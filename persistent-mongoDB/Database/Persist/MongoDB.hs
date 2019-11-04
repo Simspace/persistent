@@ -95,7 +95,6 @@ module Database.Persist.MongoDB
 
     -- * network type
     , HostName
-    , PortID
 
     -- * MongoDB driver types
     , Database
@@ -106,6 +105,7 @@ module Database.Persist.MongoDB
     , (DB.=:)
     , DB.ObjectId
     , DB.MongoContext
+    , DB.PortID
 
     -- * Database.Persist
     , module Database.Persist
@@ -123,7 +123,6 @@ import Data.Bson (ObjectId(..))
 import qualified Database.MongoDB as DB
 import Database.MongoDB.Query (Database)
 import Control.Applicative as A (Applicative, (<$>))
-import Network (PortID (PortNumber))
 import Network.Socket (HostName)
 import Data.Maybe (mapMaybe, fromJust)
 import qualified Data.Text as T
@@ -195,17 +194,17 @@ instance FromJSON NoOrphanNominalDiffTime where
 #endif
     parseJSON _ = fail "couldn't parse diff time"
 
-newtype NoOrphanPortID = NoOrphanPortID PortID deriving (Show, Eq)
+newtype NoOrphanPortID = NoOrphanPortID DB.PortID deriving (Show, Eq)
 
 
 instance FromJSON NoOrphanPortID where
 #if MIN_VERSION_aeson(0, 7, 0)
-    parseJSON (Number  x) = (return . NoOrphanPortID . PortNumber . fromIntegral ) cnvX
+    parseJSON (Number  x) = (return . NoOrphanPortID . DB.PortNumber . fromIntegral ) cnvX
       where cnvX :: Word16
             cnvX = round x
 
 #else
-    parseJSON (Number (I x)) = (return . NoOrphanPortID . PortNumber . fromInteger) x
+    parseJSON (Number (I x)) = (return . NoOrphanPortID . DB.PortNumber . fromInteger) x
 
 #endif
     parseJSON _ = fail "couldn't parse port number"
@@ -264,12 +263,12 @@ withConnection mc =
   withMongoDBPool (mgDatabase mc) (T.unpack $ mgHost mc) (mgPort mc) (mgAuth mc) (mgPoolStripes mc) (mgStripeConnections mc) (mgConnectionIdleTime mc)
 
 withMongoDBConn :: (Trans.MonadIO m, Applicative m)
-                => Database -> HostName -> PortID
+                => Database -> HostName -> DB.PortID
                 -> Maybe MongoAuth -> NominalDiffTime
                 -> (ConnectionPool -> m b) -> m b
 withMongoDBConn dbname hostname port mauth connectionIdleTime = withMongoDBPool dbname hostname port mauth 1 1 connectionIdleTime
 
-createPipe :: HostName -> PortID -> IO DB.Pipe
+createPipe :: HostName -> DB.PortID -> IO DB.Pipe
 createPipe hostname port = DB.connect (DB.Host hostname port)
 
 createReplicatSet :: (DB.ReplicaSetName, [DB.Host]) -> Database -> Maybe MongoAuth -> IO Connection
@@ -299,13 +298,13 @@ testAccess pipe dbname mAuth = do
       Nothing -> return undefined
     return ()
 
-createConnection :: Database -> HostName -> PortID -> Maybe MongoAuth -> IO Connection
+createConnection :: Database -> HostName -> DB.PortID -> Maybe MongoAuth -> IO Connection
 createConnection dbname hostname port mAuth = do
     pipe <- createPipe hostname port
     testAccess pipe dbname mAuth
     return $ Connection pipe dbname
 
-createMongoDBPool :: (Trans.MonadIO m, Applicative m) => Database -> HostName -> PortID
+createMongoDBPool :: (Trans.MonadIO m, Applicative m) => Database -> HostName -> DB.PortID
                   -> Maybe MongoAuth
                   -> Int -- ^ pool size (number of stripes)
                   -> Int -- ^ stripe size (number of connections per stripe)
@@ -339,7 +338,7 @@ type PipePool = Pool.Pool DB.Pipe
 -- The database parameter has not yet been applied yet.
 -- This is useful for switching between databases (on the same host and port)
 -- Unlike the normal pool, no authentication is available
-createMongoDBPipePool :: (Trans.MonadIO m, Applicative m) => HostName -> PortID
+createMongoDBPipePool :: (Trans.MonadIO m, Applicative m) => HostName -> DB.PortID
                   -> Int -- ^ pool size (number of stripes)
                   -> Int -- ^ stripe size (number of connections per stripe)
                   -> NominalDiffTime -- ^ time a connection is left idle before closing
@@ -356,7 +355,7 @@ withMongoPool :: (Trans.MonadIO m, Applicative m) => MongoConf -> (ConnectionPoo
 withMongoPool conf connectionReader = createMongoPool conf >>= connectionReader
 
 withMongoDBPool :: (Trans.MonadIO m, Applicative m) =>
-  Database -> HostName -> PortID -> Maybe MongoAuth -> Int -> Int -> NominalDiffTime -> (ConnectionPool -> m b) -> m b
+  Database -> HostName -> DB.PortID -> Maybe MongoAuth -> Int -> Int -> NominalDiffTime -> (ConnectionPool -> m b) -> m b
 withMongoDBPool dbname hostname port mauth poolStripes stripeConnections connectionIdleTime connectionReader = do
   pool <- createMongoDBPool dbname hostname port mauth poolStripes stripeConnections connectionIdleTime
   connectionReader pool
@@ -638,7 +637,7 @@ instance PersistUniqueWrite DB.MongoContext where
 
     upsertBy uniq newRecord upds = do
         let uniqueDoc = toUniquesDoc uniq :: [DB.Field]
-        let uniqKeys = map DB.label uniqueDoc :: [DB.Label]   
+        let uniqKeys = map DB.label uniqueDoc :: [DB.Label]
         let insDoc = DB.exclude uniqKeys $ toInsertDoc newRecord :: DB.Document
         let selection = DB.select uniqueDoc $ collectionName newRecord :: DB.Selection
         mdoc <- getBy uniq
@@ -1122,7 +1121,7 @@ data MongoAuth = MongoAuth DB.Username DB.Password deriving Show
 data MongoConf = MongoConf
     { mgDatabase :: Text
     , mgHost     :: Text
-    , mgPort     :: PortID
+    , mgPort     :: DB.PortID
     , mgAuth     :: Maybe MongoAuth
     , mgAccessMode :: DB.AccessMode
     , mgPoolStripes :: Int
